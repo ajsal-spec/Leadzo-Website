@@ -17,7 +17,7 @@ from fontTools.pens.basePen import BasePen
 from fontTools.pens.transformPen import TransformPen
 from fontTools.svgLib.path import parse_path
 from fontTools.ttLib import TTFont
-from reportlab.lib.colors import CMYKColor
+from reportlab.lib.colors import CMYKColor, Color
 from reportlab.pdfgen import canvas
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -44,24 +44,47 @@ def Y(px):  # reference y is top-down
     return BLEED + TRIM_H - px * SY
 
 
-# ---------------------------------------------------------------- colours (CMYK)
-def cmyk(c, m, y, k):
-    return CMYKColor(c / 100, m / 100, y / 100, k / 100)
+# ---------------------------------------------------------------- colours
+# Hex values are sampled from the approved design. In CMYK mode each one is
+# converted with the plain RGB->CMYK formula; QR black is forced to K-only.
+PALETTE = {
+    "BLUE": "#0166FB",         # brand blue (stripe, logo, back background)
+    "BLUE_DOT": "#4A90FF",     # back-side dot pattern (max)
+    "BLUE_STRIPE": "#B0CFFC",  # back-side right edge stripe
+    "LOGO_TINT": "#D3E4FF",    # light "L" inside the logo mark
+    "NAVY": "#1E2B4F",         # name / contact text
+    "FRAME": "#E3EAF6",        # faint concentric frames on front
+    "WHITE": "#FFFFFF",
+}
+MODE = "cmyk"
 
 
-BLUE = cmyk(88, 55, 0, 0)          # brand blue
-BLUE_DOT = cmyk(62, 30, 0, 0)      # back-side dot pattern (max)
-BLUE_STRIPE = cmyk(35, 15, 0, 0)   # back-side right edge stripe
-LOGO_TINT = cmyk(30, 12, 0, 0)     # inner square of the logo mark
-NAVY = cmyk(90, 75, 30, 30)        # name / contact text
-FRAME = cmyk(10, 4, 0, 0)          # faint concentric frames on front
-WHITE = cmyk(0, 0, 0, 0)
-BLACK = cmyk(0, 0, 0, 100)         # QR modules: single-ink black
+def color(hexstr):
+    r, g, b = (int(hexstr[i:i + 2], 16) / 255 for i in (1, 3, 5))
+    if MODE == "rgb":
+        return Color(r, g, b)
+    k = 1 - max(r, g, b)
+    if k >= 1:
+        return CMYKColor(0, 0, 0, 1)
+    return CMYKColor(*(round((1 - v - k) / (1 - k), 3) for v in (r, g, b)), round(k, 3))
+
+
+def set_mode(mode):
+    global MODE, BLACK
+    MODE = mode
+    for name, hexstr in PALETTE.items():
+        globals()[name] = color(hexstr)
+    BLACK = CMYKColor(0, 0, 0, 1) if mode == "cmyk" else Color(0, 0, 0)  # QR modules
+
+
+set_mode("cmyk")
 
 QR_URL = "https://leadzo.co.in/professionals/join"
 
 
 def mix(a, b, t):
+    if MODE == "rgb":
+        return Color(*[x + (y - x) * t for x, y in zip(a.rgb(), b.rgb())])
     return CMYKColor(*[a_ + (b_ - a_) * t for a_, b_ in zip(
         (a.cyan, a.magenta, a.yellow, a.black), (b.cyan, b.magenta, b.yellow, b.black))])
 
@@ -89,8 +112,8 @@ class RLPen(BasePen):
 
 
 class Font:
-    def __init__(self, weight):
-        tt = TTFont(os.path.join(HERE, "fonts", f"plus-jakarta-sans-latin-{weight}-normal.woff"))
+    def __init__(self, weight, family="plus-jakarta-sans"):
+        tt = TTFont(os.path.join(HERE, "fonts", f"{family}-latin-{weight}-normal.woff"))
         tt.flavor = None
         buf = io.BytesIO()
         tt.save(buf)
@@ -137,6 +160,7 @@ class Font:
 
 
 MEDIUM, SEMIBOLD, BOLD = Font(500), Font(600), Font(700)
+WORDMARK = Font(700, "quicksand")  # closest match to the Leadzo wordmark
 
 # ---------------------------------------------------------------- icons (Lucide, 24x24, stroke 2)
 ICONS = {
@@ -210,20 +234,23 @@ def build_front(path):
     ix, iy, isz = X(65), Y(120), 52 * S
     fill_rect(c, ix, iy, isz, isz, BLUE, r=12 * S)
     u = isz / 52.0
-    fill_rect(c, ix + 24 * u, iy + 24 * u, 15 * u, 15 * u, LOGO_TINT, r=3 * u)
-    c.setFillColor(WHITE)
-    p = c.beginPath()  # white "L"
-    p.moveTo(ix + 14 * u, iy + 39 * u)
-    p.lineTo(ix + 21 * u, iy + 39 * u)
-    p.lineTo(ix + 21 * u, iy + 20 * u)
-    p.lineTo(ix + 39 * u, iy + 20 * u)
-    p.lineTo(ix + 39 * u, iy + 13 * u)
-    p.lineTo(ix + 14 * u, iy + 13 * u)
-    p.close()
-    c.drawPath(p, stroke=0, fill=1)
+
+    def bracket(pts, col):  # thick rounded stroke, coordinates top-down in a 52-unit box
+        c.setStrokeColor(col)
+        c.setLineWidth(7 * u)
+        c.setLineCap(1)
+        c.setLineJoin(1)
+        p = c.beginPath()
+        p.moveTo(ix + pts[0][0] * u, iy + isz - pts[0][1] * u)
+        for px_, py_ in pts[1:]:
+            p.lineTo(ix + px_ * u, iy + isz - py_ * u)
+        c.drawPath(p, stroke=1, fill=0)
+
+    bracket([(16, 17), (16, 36), (29, 36)], LOGO_TINT)   # lower-left "L"
+    bracket([(24, 16), (36, 16), (36, 27)], WHITE)       # upper-right corner
 
     # wordmark
-    SEMIBOLD.draw(c, "leadzo", SEMIBOLD.fit("leadzo", 170 * S), X(132), Y(115), BLUE)
+    WORDMARK.draw(c, "Leadzo", WORDMARK.fit("Leadzo", 170 * S), X(130), Y(115), BLUE)
 
     # name + title
     BOLD.draw(c, "Rakshit Honakeri", BOLD.fit("Rakshit Honakeri", 338 * S), X(65), Y(190), NAVY)
@@ -268,15 +295,14 @@ def build_back(path):
     fill_rect(c, 0, 0, PAGE_W, PAGE_H, BLUE)
 
     # dot pattern: strongest at top and bottom edges, fades towards middle
-    step = 13
-    for gy in range(-13, 445, step):
-        for gx in range(-13, 760, step):
-            t = max(0.0, 1 - (gy + 13) / 110) * 0.55 + max(0.0, (gy - 290) / 150) * 0.75
-            t *= 1 - 0.5 * max(0.0, (gx - 380) / 360)
-            if t < 0.06:
+    step = 19
+    for gy in range(-11, 450, step):
+        for gx in range(-12, 760, step):
+            t = max(0.0, 1 - (gy + 11) / 150) * 0.8 + max(0.0, (gy - 270) / 140) * 0.9
+            if t < 0.08:
                 continue
             c.setFillColor(mix(BLUE, BLUE_DOT, min(t, 1)))
-            c.circle(X(gx), Y(gy), 1.25 * S, stroke=0, fill=1)
+            c.circle(X(gx), Y(gy), 1.7 * S, stroke=0, fill=1)
 
     # right edge stripe (into bleed)
     fill_rect(c, X(712), 0, PAGE_W - X(712), PAGE_H, BLUE_STRIPE)
@@ -347,10 +373,13 @@ def export_qr():
 
 
 if __name__ == "__main__":
-    os.makedirs(OUT, exist_ok=True)
-    for build, side in ((build_front, "FRONT"), (build_back, "BACK")):
-        pdf = os.path.join(OUT, f"leadzo-card-rakshit-{side}.pdf")
-        build(pdf)
-        strip_unused_fonts(pdf)
-    export_qr()
+    for mode, folder in (("cmyk", "output"), ("rgb", "output-rgb")):
+        set_mode(mode)
+        OUT = os.path.join(HERE, folder)
+        os.makedirs(OUT, exist_ok=True)
+        for build, side in ((build_front, "FRONT"), (build_back, "BACK")):
+            pdf = os.path.join(OUT, f"leadzo-card-rakshit-{side}.pdf")
+            build(pdf)
+            strip_unused_fonts(pdf)
+        export_qr()
     print("done")
