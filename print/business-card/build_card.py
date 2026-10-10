@@ -49,7 +49,7 @@ def Y(px):  # reference y is top-down
 # converted with the plain RGB->CMYK formula; QR black is forced to K-only.
 PALETTE = {
     "BLUE": "#0166FB",         # brand blue (stripe, logo, back background)
-    "BLUE_DOT": "#4A90FF",     # back-side dot pattern (max)
+    "BLUE_DOT": "#5C9BFF",     # back-side dot pattern (max)
     "BLUE_STRIPE": "#B0CFFC",  # back-side right edge stripe
     "LOGO_TINT": "#D3E4FF",    # light "L" inside the logo mark
     "NAVY": "#1E2B4F",         # name / contact text
@@ -112,8 +112,8 @@ class RLPen(BasePen):
 
 
 class Font:
-    def __init__(self, weight, family="plus-jakarta-sans"):
-        tt = TTFont(os.path.join(HERE, "fonts", f"{family}-latin-{weight}-normal.woff"))
+    def __init__(self, filename):
+        tt = TTFont(os.path.join(HERE, "fonts", filename))
         tt.flavor = None
         buf = io.BytesIO()
         tt.save(buf)
@@ -159,8 +159,9 @@ class Font:
         return width_pt / self.width(text, 1.0)
 
 
-MEDIUM, SEMIBOLD, BOLD = Font(500), Font(600), Font(700)
-WORDMARK = Font(700, "quicksand")  # closest match to the Leadzo wordmark
+# Inter matches the type used in the approved design.
+REGULAR, MEDIUM, SEMIBOLD, BOLD = (Font(f"Inter-{w}.otf") for w in ("Regular", "Medium", "SemiBold", "Bold"))
+WORDMARK = Font("quicksand-latin-700-normal.woff")  # closest match to the Leadzo wordmark
 
 # ---------------------------------------------------------------- icons (Lucide, 24x24, stroke 2)
 ICONS = {
@@ -254,7 +255,7 @@ def build_front(path):
 
     # name + title
     BOLD.draw(c, "Rakshit Honakeri", BOLD.fit("Rakshit Honakeri", 338 * S), X(65), Y(190), NAVY)
-    MEDIUM.draw(c, "Sales Head", 9.0, X(65), Y(227), BLUE)
+    REGULAR.draw(c, "Sales Head", REGULAR.fit("Sales Head", 134 * S), X(65), Y(227), BLUE)
 
     # contacts
     size = 8.5
@@ -262,7 +263,7 @@ def build_front(path):
             ("globe", "www.leadzo.co.in", 356))
     for icon, text, base in rows:
         draw_icon(c, icon, X(77), Y(base) + size * 0.36, 23 * S, BLUE)
-        MEDIUM.draw(c, text, size, X(110), Y(base), NAVY)
+        REGULAR.draw(c, text, size, X(110), Y(base), NAVY)
 
     c.showPage()
     c.save()
@@ -298,11 +299,11 @@ def build_back(path):
     step = 19
     for gy in range(-11, 450, step):
         for gx in range(-12, 760, step):
-            t = max(0.0, 1 - (gy + 11) / 150) * 0.8 + max(0.0, (gy - 270) / 140) * 0.9
+            t = max(0.0, 1 - (gy + 11) / 170) * 1.1 + max(0.0, (gy - 260) / 120) * 1.1
             if t < 0.08:
                 continue
             c.setFillColor(mix(BLUE, BLUE_DOT, min(t, 1)))
-            c.circle(X(gx), Y(gy), 1.7 * S, stroke=0, fill=1)
+            c.circle(X(gx), Y(gy), 1.9 * S, stroke=0, fill=1)
 
     # right edge stripe (into bleed)
     fill_rect(c, X(712), 0, PAGE_W - X(712), PAGE_H, BLUE_STRIPE)
@@ -330,9 +331,9 @@ def build_back(path):
     # NEW: call to action under the content
     cta = "Scan to join as a professional"
     arrow_w = 4 + 9
-    cta_size = min(9.0, SEMIBOLD.fit(cta, max_w - arrow_w))
+    cta_size = min(9.0, MEDIUM.fit(cta, max_w - arrow_w))
     assert cta_size >= 8.0, cta_size
-    w = SEMIBOLD.draw(c, cta, cta_size, X(tx), Y(322), WHITE)
+    w = MEDIUM.draw(c, cta, cta_size, X(tx), Y(322), WHITE)
     ax, ay = X(tx) + w + 4, Y(322) + cta_size * 0.34   # arrow pointing to the QR
     c.setStrokeColor(WHITE)
     c.setLineWidth(1.1)
